@@ -1,16 +1,60 @@
-# React + Vite
+# SportSphere
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+SportSphere is a sports analytics chat application built for my final project. It uses a custom AI model to answer sports-related questions and features a modern web interface.
 
-Currently, two official plugins are available:
+## Project Contents
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- frontend/: Contains the React application code.
+- backend/: Contains the Python FastAPI server and database logic.
+- backend/Modelfile: The configuration file for the custom AI model (SportSphere).
 
-## React Compiler
+## Requirements
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+You will need the following installed:
+- Node.js
+- Python 3.10 or higher
+- Ollama
 
-## Expanding the ESLint configuration
+## Installation and Setup
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+Follow these steps to run the project locally.
+
+### 1. Set up the AI Model
+
+First, you need to create the custom model in Ollama.
+
+1. Open a terminal and go to the backend folder:
+   cd backend
+
+2. Run the create command:
+   ollama create SportSphere -f Modelfile
+
+### 2. Run the Backend
+
+1. In the backend folder, install the python libraries:
+   pip install fastapi "uvicorn[standard]" sqlalchemy
+
+2. Start the server:
+   python -m uvicorn main:app --reload
+
+The backend will start running at http://localhost:8000.
+
+### 3. Run the Frontend
+
+1. Open a new terminal window and go to the frontend folder:
+   cd frontend
+
+2. Install the javascript packages:
+   npm install
+
+3. Start the application:
+   npm run dev
+
+4. Open the link shown in the terminal (usually http://localhost:5173) in your browser.
+
+## Features
+
+- Custom SportSphere model that only talks about sports.
+- Saves your chat history automatically.
+- Dark mode and Light mode support.
+- Ability to rename conversations.

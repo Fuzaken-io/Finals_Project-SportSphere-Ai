@@ -7,20 +7,41 @@ const ChatInterface = ({ conversation, onUpdateMessages }) => {
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [attachedFiles, setAttachedFiles] = useState([]);
+    const scrollContainerRef = useRef(null);
     const messagesEndRef = useRef(null);
     const textareaRef = useRef(null);
     const fileInputRef = useRef(null);
     const abortControllerRef = useRef(null);
     const { theme } = useTheme();
-
     const messages = conversation?.messages || [];
 
-    const scrollToBottom = () => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
+
+    const scrollToBottom = (smooth = false) => {
+        if (!messagesEndRef.current) return;
+        messagesEndRef.current.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto' });
     };
 
+    const handleScroll = () => {
+        if (scrollContainerRef.current) {
+            const { scrollTop, scrollHeight, clientHeight } = scrollContainerRef.current;
+            // Strict threshold: consider "at bottom" if within 50px
+            const isAtBottom = scrollHeight - scrollTop - clientHeight < 50;
+            setShouldAutoScroll(isAtBottom);
+        }
+    };
+
+    // Scroll trigger
     useEffect(() => {
-        scrollToBottom();
+        // If it's a new user message, force scroll
+        if (messages.length > 0 && messages[messages.length - 1].role === 'user') {
+            setShouldAutoScroll(true);
+            scrollToBottom(true);
+        }
+        // If streaming and auto-scroll is enabled, keep scrolling
+        else if (shouldAutoScroll) {
+            scrollToBottom(false); // Instant scroll to prevent lag
+        }
     }, [messages, isLoading]);
 
     // Auto-resize textarea
@@ -75,10 +96,15 @@ const ChatInterface = ({ conversation, onUpdateMessages }) => {
         }
 
         const userMessage = { role: 'user', content: messageContent };
-        const updatedMessages = [...messages, userMessage];
+        // We do NOT add the assistant message yet to the backend call, only for UI display
+        const textExchangedMessages = [...messages, userMessage];
 
-        // Update conversation immediately
-        onUpdateMessages(conversation.id, updatedMessages);
+        // Prepare placeholder for streaming
+        const assistantPlaceholder = { role: 'assistant', content: '' };
+        const messagesForUI = [...textExchangedMessages, assistantPlaceholder];
+
+        // Update conversation immediately with placeholder
+        onUpdateMessages(conversation.id, messagesForUI);
 
         setInput('');
         setAttachedFiles([]);
@@ -91,22 +117,42 @@ const ChatInterface = ({ conversation, onUpdateMessages }) => {
         // Create abort controller for cancellation
         abortControllerRef.current = new AbortController();
 
+        let accumulatedContent = "";
+
         try {
-            const responseMessage = await sendMessageToOllama(
-                updatedMessages,
+            await sendMessageToOllama(
+                textExchangedMessages, // Send history + new user msg
+                conversation.id,
+                (chunk) => {
+                    accumulatedContent += chunk;
+                    // Update UI with growing content
+                    const streamliningMsgs = [
+                        ...textExchangedMessages,
+                        { role: 'assistant', content: accumulatedContent }
+                    ];
+                    onUpdateMessages(conversation.id, streamliningMsgs);
+                },
                 abortControllerRef.current.signal
             );
-            onUpdateMessages(conversation.id, [...updatedMessages, responseMessage]);
+            // Final update is handled by the last chunk, essentially. 
+            // The sendMessageToOllama returns full string but we are updating incrementally.
+            // We can do one final ensure:
+            const finalMsgs = [
+                ...textExchangedMessages,
+                { role: 'assistant', content: accumulatedContent }
+            ];
+            onUpdateMessages(conversation.id, finalMsgs);
+
         } catch (error) {
             if (error.message === 'cancelled') {
-                // User cancelled - don't show error
                 console.log('Generation cancelled by user');
             } else {
                 const errorMessage = {
                     role: 'assistant',
                     content: "Sorry, I couldn't reach the server. Is Ollama running?",
                 };
-                onUpdateMessages(conversation.id, [...updatedMessages, errorMessage]);
+                // Replace the placeholder with error
+                onUpdateMessages(conversation.id, [...textExchangedMessages, errorMessage]);
             }
         } finally {
             setIsLoading(false);
@@ -139,52 +185,63 @@ const ChatInterface = ({ conversation, onUpdateMessages }) => {
         <div className="flex flex-col h-full w-full relative">
 
             {/* Messages Stream */}
-            <div className="flex-1 overflow-y-auto w-full">
+            <div
+                ref={scrollContainerRef}
+                onScroll={handleScroll}
+                className="flex-1 overflow-y-auto w-full"
+            >
                 <div className="max-w-3xl mx-auto px-4 py-8 flex flex-col gap-6">
                     {messages.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center min-h-[70vh] text-center space-y-6">
+                        <div className="flex flex-col items-center justify-center min-h-[70vh] text-center space-y-6 relative z-10">
+                            {/* Glow Effect Background */}
+                            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-blue-500/20 rounded-full blur-[120px] pointer-events-none -z-10"></div>
+
                             {/* Logo */}
-                            <div className="w-20 h-20 rounded-full shadow-lg flex items-center justify-center mb-2 bg-gradient-to-br from-orange-500 to-orange-600">
-                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="white" className="w-11 h-11">
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418" />
-                                </svg>
+                            {/* Logo */}
+                            <div className="mb-6 relative group">
+                                <div className="absolute inset-0 bg-orange-500 rounded-full blur opacity-20 group-hover:opacity-40 transition-opacity duration-500"></div>
+                                <img
+                                    src="/logo-light.png"
+                                    alt="SportSphere Logo"
+                                    className="w-24 h-24 relative z-10 drop-shadow-2xl hover:scale-105 transition-transform duration-300 object-cover rounded-full"
+                                />
                             </div>
 
                             {/* Title */}
                             <div>
-                                <p className={`text-sm mb-2 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-500'}`}>
-                                    Hello! I'm here to help you with detailed sports analysis and predictions.
+                                <p className={`text-sm mb-4 font-medium tracking-wide uppercase ${theme === 'dark' ? 'text-blue-400' : 'text-slate-500'}`}>
+                                    Hello! I'm here to help you with detailed sports analysis.
                                 </p>
-                                <h2 className={`text-3xl font-bold mb-1 ${theme === 'dark' ? 'text-slate-100' : 'text-slate-900'
+                                <h2 className={`text-4xl font-extrabold mb-2 tracking-tight ${theme === 'dark' ? 'text-white' : 'text-slate-900'
                                     }`}>SportSphere AI</h2>
-                                <p className={`text-lg ${theme === 'dark' ? 'text-slate-300' : 'text-slate-600'}`}>
+                                <h3 className={`text-xl font-medium ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>
                                     Sports Analysis and Predictions
-                                </p>
+                                </h3>
                             </div>
 
                             {/* Suggestion Cards */}
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-4xl w-full mt-8 px-4">
-                                <button onClick={() => { setInput("Analyze the shooting percentages of key players in the upcoming game."); setTimeout(() => handleSend(), 100); }} className={`p-4 rounded-xl text-left transition-all border ${theme === 'dark'
-                                    ? 'bg-slate-800/50 border-slate-700 hover:bg-slate-800 hover:border-orange-500/50'
-                                    : 'bg-white border-gray-200 hover:bg-gray-50 hover:border-orange-500/50 shadow-sm'
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-4xl w-full mt-12 px-4">
+                                <button onClick={() => { setInput("Analyze the shooting percentages of key players in the upcoming game."); setTimeout(() => handleSend(), 100); }} className={`p-5 rounded-2xl text-left transition-all border group relative overflow-hidden ${theme === 'dark'
+                                    ? 'bg-white/5 backdrop-blur-md border-white/10 hover:bg-white/10 hover:border-white/20 text-slate-200'
+                                    : 'bg-white border-gray-200 hover:bg-gray-50 hover:border-blue-500/50 shadow-sm text-slate-700'
                                     }`}>
-                                    <p className={`text-sm ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
-                                        Analyze the shooting percentages of key players in the upcoming game.
+                                    <p className="text-sm font-medium leading-relaxed relative z-10">
+                                        Analyze the shooting percentages of key players.
                                     </p>
                                 </button>
-                                <button onClick={() => { setInput("Analyze the shooting percentages of key players in the upcoming game."); setTimeout(() => handleSend(), 100); }} className={`p-4 rounded-xl text-left transition-all border ${theme === 'dark'
-                                    ? 'bg-slate-800/50 border-slate-700 hover:bg-slate-800 hover:border-orange-500/50'
-                                    : 'bg-white border-gray-200 hover:bg-gray-50 hover:border-orange-500/50 shadow-sm'
+                                <button onClick={() => { setInput("Evaluate the impact of recent injuries on the team's performance."); setTimeout(() => handleSend(), 100); }} className={`p-5 rounded-2xl text-left transition-all border group relative overflow-hidden ${theme === 'dark'
+                                    ? 'bg-white/5 backdrop-blur-md border-white/10 hover:bg-white/10 hover:border-white/20 text-slate-200'
+                                    : 'bg-white border-gray-200 hover:bg-gray-50 hover:border-blue-500/50 shadow-sm text-slate-700'
                                     }`}>
-                                    <p className={`text-sm ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
-                                        Evaluate the impact of recent injuries on the team's performance.
+                                    <p className="text-sm font-medium leading-relaxed relative z-10">
+                                        Evaluate the impact of recent injuries on the team.
                                     </p>
                                 </button>
-                                <button onClick={() => { setInput("Analyze the shooting percentages of key players in the upcoming game."); setTimeout(() => handleSend(), 100); }} className={`p-4 rounded-xl text-left transition-all border ${theme === 'dark'
-                                    ? 'bg-slate-800/50 border-slate-700 hover:bg-slate-800 hover:border-orange-500/50'
-                                    : 'bg-white border-gray-200 hover:bg-gray-50 hover:border-orange-500/50 shadow-sm'
+                                <button onClick={() => { setInput("Compare the recent performance trends of both teams."); setTimeout(() => handleSend(), 100); }} className={`p-5 rounded-2xl text-left transition-all border group relative overflow-hidden ${theme === 'dark'
+                                    ? 'bg-white/5 backdrop-blur-md border-white/10 hover:bg-white/10 hover:border-white/20 text-slate-200'
+                                    : 'bg-white border-gray-200 hover:bg-gray-50 hover:border-blue-500/50 shadow-sm text-slate-700'
                                     }`}>
-                                    <p className={`text-sm ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
+                                    <p className="text-sm font-medium leading-relaxed relative z-10">
                                         Compare the recent performance trends of both teams.
                                     </p>
                                 </button>
@@ -196,19 +253,7 @@ const ChatInterface = ({ conversation, onUpdateMessages }) => {
                         ))
                     )}
 
-                    {isLoading && (
-                        <div className="flex justify-start w-full">
-                            <div className={`flex items-center gap-2 px-4 py-3 rounded-2xl rounded-tl-none ${theme === 'dark' ? 'bg-slate-700' : 'bg-[#e5e7eb]'
-                                }`}>
-                                <div className={`w-2 h-2 rounded-full animate-bounce ${theme === 'dark' ? 'bg-slate-300' : 'bg-slate-400'
-                                    }`}></div>
-                                <div className={`w-2 h-2 rounded-full animate-bounce delay-75 ${theme === 'dark' ? 'bg-slate-300' : 'bg-slate-400'
-                                    }`}></div>
-                                <div className={`w-2 h-2 rounded-full animate-bounce delay-150 ${theme === 'dark' ? 'bg-slate-300' : 'bg-slate-400'
-                                    }`}></div>
-                            </div>
-                        </div>
-                    )}
+                    {/* Loading indicator removed as it's now inside the MessageBubble */}
                     <div ref={messagesEndRef} className="h-4" />
                 </div>
             </div>
@@ -237,7 +282,7 @@ const ChatInterface = ({ conversation, onUpdateMessages }) => {
                     )}
 
                     <div className={`relative flex items-end w-full p-2 rounded-3xl overflow-hidden transition-all border ${theme === 'dark'
-                        ? 'bg-slate-800 border-slate-700'
+                        ? 'bg-[#1e293b]/60 backdrop-blur-xl border-white/10 shadow-2xl'
                         : 'bg-white border-gray-300 shadow-sm'
                         }`}>
 
@@ -298,7 +343,7 @@ const ChatInterface = ({ conversation, onUpdateMessages }) => {
                                 onClick={handleSend}
                                 disabled={(!input.trim() && attachedFiles.length === 0) || !conversation}
                                 className={`p-2 m-1 rounded-full transition-all flex-shrink-0 ${(input.trim() || attachedFiles.length > 0) && conversation
-                                    ? 'bg-gradient-to-br from-orange-500 to-orange-600 text-white hover:from-orange-600 hover:to-orange-700 shadow-md'
+                                    ? 'bg-gradient-to-br from-blue-500 to-indigo-600 text-white hover:from-blue-600 hover:to-indigo-700 shadow-md'
                                     : 'bg-[#e5e5e5] text-gray-400 cursor-not-allowed'
                                     }`}
                             >

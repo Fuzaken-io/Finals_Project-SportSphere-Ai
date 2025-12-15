@@ -17,9 +17,10 @@ const Sidebar = ({
 }) => {
     const [activeDropdown, setActiveDropdown] = useState(null);
     const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0 });
-    const [renameModal, setRenameModal] = useState(null);
-    const [newTitle, setNewTitle] = useState('');
+    const [editingId, setEditingId] = useState(null);
+    const [editTitle, setEditTitle] = useState('');
     const dropdownRef = useRef(null);
+    const editInputRef = useRef(null);
     const { theme, toggleTheme } = useTheme();
 
     // Close dropdown when clicking outside
@@ -27,6 +28,11 @@ const Sidebar = ({
         const handleClickOutside = (event) => {
             if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
                 setActiveDropdown(null);
+            }
+            // Add logic to save if clicking outside input while editing, or just cancel?
+            // User requested persistence, so saving on blur is good UX.
+            if (editingId && editInputRef.current && !editInputRef.current.contains(event.target)) {
+                confirmRename();
             }
         };
 
@@ -41,7 +47,13 @@ const Sidebar = ({
             document.removeEventListener('mousedown', handleClickOutside);
             window.removeEventListener('scroll', handleScroll, true);
         };
-    }, [activeDropdown]);
+    }, [activeDropdown, editingId, editTitle]); // Add editingId dependency for click outside
+
+    useEffect(() => {
+        if (editingId && editInputRef.current) {
+            editInputRef.current.focus();
+        }
+    }, [editingId]);
 
     const toggleDropdown = (e, id) => {
         e.preventDefault();
@@ -60,16 +72,27 @@ const Sidebar = ({
     };
 
     const handleRename = (conv) => {
-        setRenameModal(conv.id);
-        setNewTitle(conv.title);
+        setEditingId(conv.id);
+        setEditTitle(conv.title);
         setActiveDropdown(null);
     };
 
     const confirmRename = () => {
-        if (newTitle.trim() && renameModal) {
-            onRename(renameModal, newTitle.trim());
-            setRenameModal(null);
-            setNewTitle('');
+        if (editingId) {
+            if (editTitle.trim() && editTitle !== conversations.find(c => c.id === editingId)?.title) {
+                onRename(editingId, editTitle.trim());
+            }
+            setEditingId(null);
+            setEditTitle('');
+        }
+    };
+
+    const handleKeyDown = (e) => {
+        if (e.key === 'Enter') {
+            confirmRename();
+        } else if (e.key === 'Escape') {
+            setEditingId(null);
+            setEditTitle('');
         }
     };
 
@@ -100,7 +123,7 @@ const Sidebar = ({
             <div
                 className={`fixed md:relative z-30 h-full border-r transition-all duration-300 ease-in-out flex flex-col
                     ${theme === 'dark'
-                        ? 'bg-slate-900 border-slate-700'
+                        ? 'bg-[#0f172a]/80 backdrop-blur-xl border-white/5'
                         : 'bg-white border-gray-200'
                     }
                     ${isMobileOpen ? 'translate-x-0 w-64' : '-translate-x-full w-64'}
@@ -110,9 +133,11 @@ const Sidebar = ({
                 {/* Header */}
                 <div className="p-4 flex items-center justify-between mb-2">
                     <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-orange-500 to-orange-600 flex items-center justify-center font-bold text-white shadow-sm">
-                            S
-                        </div>
+                        <img
+                            src="/logo-light.png"
+                            alt="SportSphere"
+                            className="w-8 h-8 rounded-lg shadow-sm object-cover"
+                        />
                         <span className={`font-semibold text-lg tracking-tight whitespace-nowrap ${theme === 'dark' ? 'text-slate-100' : 'text-slate-900'
                             }`}>SportSphere</span>
                     </div>
@@ -192,41 +217,63 @@ const Sidebar = ({
                     <div className="space-y-1">
                         {sortedConversations.map((conv) => (
                             <div key={conv.id} className="relative group">
-                                <button
-                                    onClick={() => onLoadConversation(conv.id)}
-                                    className={`w-full text-left px-3 py-2 rounded-lg transition-colors text-sm flex items-center justify-between group-hover:pr-8 ${currentConversationId === conv.id
-                                        ? theme === 'dark'
-                                            ? 'bg-slate-800 text-slate-100'
-                                            : 'bg-gray-200 text-slate-900'
-                                        : theme === 'dark'
-                                            ? 'hover:bg-slate-800/60 text-slate-300 hover:text-slate-100'
-                                            : 'hover:bg-gray-200/60 text-slate-700 hover:text-slate-900'
-                                        }`}
-                                >
-                                    <span className="truncate block flex items-center gap-2">
-                                        {conv.pinned && (
-                                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3">
-                                                <path d="M9.768 8.243l3.78-3.78a.75.75 0 1 1 1.061 1.061l-3.78 3.78 1.124 2.592a.75.75 0 0 1-.306.924l-.001.001a.75.75 0 0 1-.924-.306L8.29 9.293 5.207 12.38a.75.75 0 0 1-1.06 0l-.001-.001a.75.75 0 0 1 0-1.06l3.086-3.086-3.233-2.433a.75.75 0 0 1-.306-.925l.001-.001a.75.75 0 0 1 .924-.306l2.592 1.124 3.78-3.78a.75.75 0 0 1 1.061 1.061l-3.78 3.78 1.124 2.592a.75.75 0 0 1-.306.924l-.001.001a.75.75 0 0 1-.924-.306L9.768 8.243z" />
-                                            </svg>
-                                        )}
-                                        {conv.title}
-                                    </span>
-                                </button>
+                                {editingId === conv.id ? (
+                                    <div className={`w-full px-3 py-2 rounded-lg flex items-center gap-2 ${theme === 'dark'
+                                        ? 'bg-slate-800'
+                                        : 'bg-gray-200'
+                                        }`}>
+                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke={theme === 'dark' ? 'white' : 'black'} className="w-4 h-4 shrink-0">
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 01.865-.501 48.172 48.172 0 003.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.605-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" />
+                                        </svg>
+                                        <input
+                                            ref={editInputRef}
+                                            type="text"
+                                            value={editTitle}
+                                            onChange={(e) => setEditTitle(e.target.value)}
+                                            onKeyDown={handleKeyDown}
+                                            className="w-full bg-transparent border-none outline-none text-sm p-0 m-0"
+                                            style={{ color: theme === 'dark' ? 'white' : 'black' }}
+                                        />
+                                    </div>
+                                ) : (
+                                    <button
+                                        onClick={() => onLoadConversation(conv.id)}
+                                        className={`w-full text-left px-3 py-2 rounded-lg transition-colors text-sm flex items-center justify-between group-hover:pr-8 ${currentConversationId === conv.id
+                                            ? theme === 'dark'
+                                                ? 'bg-slate-800 text-slate-100'
+                                                : 'bg-gray-200 text-slate-900'
+                                            : theme === 'dark'
+                                                ? 'hover:bg-slate-800/60 text-slate-300 hover:text-slate-100'
+                                                : 'hover:bg-gray-200/60 text-slate-700 hover:text-slate-900'
+                                            }`}
+                                    >
+                                        <span className="truncate block flex items-center gap-2">
+                                            {conv.pinned && (
+                                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3">
+                                                    <path d="M9.768 8.243l3.78-3.78a.75.75 0 1 1 1.061 1.061l-3.78 3.78 1.124 2.592a.75.75 0 0 1-.306.924l-.001.001a.75.75 0 0 1-.924-.306L8.29 9.293 5.207 12.38a.75.75 0 0 1-1.06 0l-.001-.001a.75.75 0 0 1 0-1.06l3.086-3.086-3.233-2.433a.75.75 0 0 1-.306-.925l.001-.001a.75.75 0 0 1 .924-.306l2.592 1.124 3.78-3.78a.75.75 0 0 1 1.061 1.061l-3.78 3.78 1.124 2.592a.75.75 0 0 1-.306.924l-.001.001a.75.75 0 0 1-.924-.306L9.768 8.243z" />
+                                                </svg>
+                                            )}
+                                            {conv.title}
+                                        </span>
+                                    </button>
+                                )}
 
                                 {/* 3-Dots Menu Button */}
-                                <div className={`absolute right-1 top-1/2 -translate-y-1/2 ${activeDropdown === conv.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} transition-opacity`}>
-                                    <button
-                                        onClick={(e) => toggleDropdown(e, conv.id)}
-                                        className={`p-1 rounded transition-colors ${activeDropdown === conv.id
-                                            ? theme === 'dark' ? 'bg-slate-700' : 'bg-gray-300'
-                                            : theme === 'dark' ? 'hover:bg-slate-700' : 'hover:bg-gray-300'
-                                            } ${theme === 'dark' ? 'text-slate-400' : 'text-slate-500'}`}
-                                    >
-                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
-                                            <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM12.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM18.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0z" />
-                                        </svg>
-                                    </button>
-                                </div>
+                                {!editingId && (
+                                    <div className={`absolute right-1 top-1/2 -translate-y-1/2 ${activeDropdown === conv.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} transition-opacity`}>
+                                        <button
+                                            onClick={(e) => toggleDropdown(e, conv.id)}
+                                            className={`p-1 rounded transition-colors ${activeDropdown === conv.id
+                                                ? theme === 'dark' ? 'bg-slate-700' : 'bg-gray-300'
+                                                : theme === 'dark' ? 'hover:bg-slate-700' : 'hover:bg-gray-300'
+                                                } ${theme === 'dark' ? 'text-slate-400' : 'text-slate-500'}`}
+                                        >
+                                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM12.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM18.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0z" />
+                                            </svg>
+                                        </button>
+                                    </div>
+                                )}
                             </div>
                         ))}
                     </div>
@@ -288,47 +335,6 @@ const Sidebar = ({
                     </div>
                 )}
 
-                {/* Rename Modal */}
-                {renameModal && (
-                    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-                        <div className={`rounded-xl p-6 max-w-md w-full ${theme === 'dark' ? 'bg-slate-800' : 'bg-white'
-                            }`}>
-                            <h3 className={`text-lg font-semibold mb-4 ${theme === 'dark' ? 'text-slate-100' : 'text-slate-900'
-                                }`}>Rename Conversation</h3>
-                            <input
-                                type="text"
-                                value={newTitle}
-                                onChange={(e) => setNewTitle(e.target.value)}
-                                onKeyDown={(e) => e.key === 'Enter' && confirmRename()}
-                                className={`w-full px-3 py-2 rounded-lg border outline-none ${theme === 'dark'
-                                    ? 'bg-slate-700 border-slate-600 text-slate-100'
-                                    : 'bg-white border-gray-300 text-slate-900'
-                                    }`}
-                                autoFocus
-                            />
-                            <div className="flex gap-2 mt-4">
-                                <button
-                                    onClick={confirmRename}
-                                    className="flex-1 px-4 py-2 bg-gradient-to-br from-orange-500 to-orange-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                                >
-                                    Save
-                                </button>
-                                <button
-                                    onClick={() => {
-                                        setRenameModal(null);
-                                        setNewTitle('');
-                                    }}
-                                    className={`flex-1 px-4 py-2 rounded-lg transition-colors ${theme === 'dark'
-                                        ? 'bg-slate-700 text-slate-200 hover:bg-slate-600'
-                                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                                        }`}
-                                >
-                                    Cancel
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                )}
 
                 {/* Footer */}
                 <div className={`p-3 border-t ${theme === 'dark' ? 'border-slate-700' : 'border-slate-700'

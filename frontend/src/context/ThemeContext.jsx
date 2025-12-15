@@ -1,5 +1,5 @@
-import React, { createContext, useContext, useEffect } from 'react';
-import { useLocalStorage } from '../hooks/useLocalStorage';
+// import { useLocalStorage } from '../hooks/useLocalStorage'; // Removed
+import { useState, createContext, useContext, useEffect } from 'react';
 
 const ThemeContext = createContext();
 
@@ -12,7 +12,22 @@ export const useTheme = () => {
 };
 
 export const ThemeProvider = ({ children }) => {
-    const [theme, setTheme] = useLocalStorage('dribol-theme', 'light');
+    const [theme, setTheme] = useState(() => {
+        try {
+            const item = window.localStorage.getItem('sportsphere-theme');
+            return item ? JSON.parse(item) : 'dark';
+        } catch (error) {
+            return 'dark';
+        }
+    });
+
+    useEffect(() => {
+        try {
+            window.localStorage.setItem('sportsphere-theme', JSON.stringify(theme));
+        } catch (e) {
+            console.error("Failed to save theme", e);
+        }
+    }, [theme]);
 
     useEffect(() => {
         // Apply theme class to document
