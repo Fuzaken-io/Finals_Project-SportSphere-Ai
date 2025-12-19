@@ -56,5 +56,3 @@ The backend will start running at http://localhost:8000.
 
 - Custom SportSphere model that only talks about sports.
 - Saves your chat history automatically.
-- Dark mode and Light mode support.
-- Ability to rename conversations.
